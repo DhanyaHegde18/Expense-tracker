@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login Page</title>
+    <script>
+        function redirectToMain() {
+          window.location.href = "main.html";}
+    </script>
+    <link rel="stylesheet" href="downloads/css/styles.css">
+</head>
+<body>
+    <div class="login-container">
+        <h1>Login</h1>
+        <form id="loginForm" onsubmit="event.preventDefault(); redirectToMain();">
+            <div class="input-group">
+                <label for="userId">Email</label>
+                <input type="text" id="userId" name="userId" placeholder="Enter your email" required>
+            </div>
+            <div class="input-group">
+                <label for="password">Password</label>
+                <input type="password" id="password" name="password" placeholder="Enter your password" required>
+            </div>
+            <div class="button-group">
+                <button type="submit" id="loginButton">Login</button>
+                <button type="button" id="signinButton">Sign Up</button>
+            </div>
+            <a href="#" id="forgotPassword">Forgot Password?</a>
+        </form>
+    </div>
+    <script src="script.js"></script>
+</body>
+</html>
