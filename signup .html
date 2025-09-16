@@ -1,1 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Spending Navigator - Sign Up</title>
+    <script>
+        function redirectToMain() {
+          window.location.href = "main.html";}
+    </script>
+    <link rel="stylesheet" href="downloads/css/signup.css">
+</head>
+<body>
+    <div class="signup-container">
+        <h1>Spending Navigator - Sign Up</h1>
+        <form id="signupForm" onsubmit="event.preventDefault(); redirectToMain();">
+            <div class="input-group">
+                <label for="fullName">Full Name</label>
+                <input type="text" id="fullName" name="fullName" placeholder="Enter your full name" required>
+            </div>
+            <div class="input-group">
+                <label for="email">Email Address</label>
+                <input type="email" id="email" name="email" placeholder="Enter your email" required>
+            </div>
+            <div class="input-group">
+                <label for="password">Password</label>
+                <input type="password" id="password" name="password" placeholder="Create a password" required>
+            </div>
+            <div class="input-group">
+                <label for="budget">Monthly Budget</label>
+                <input type="number" id="budget" name="budget" placeholder="Enter your monthly budget (in USD)">
+            </div>
+            <div class="button-group">
+                <button type="submit" id="signupButton">Sign Up</button>
+            </div>
+            <p class="redirect-message">Already have an account? <a href="login.html">Log in here</a>.</p>
+        </form>
+    </div>
+    <script src="script.js"></script>
+</body>
+</html>
 
