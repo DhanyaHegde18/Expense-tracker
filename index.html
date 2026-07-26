@@ -253,27 +253,41 @@
 
 <script>
 /* ===============================
-   Data structure & localStorage
+   Backend API client
    =============================== */
 /*
-  Storage schema:
-  sn_users = {
-    "email@example.com": {
-      firstName, lastName, password,
-      budget: number,
-      expenses: [ {category, amount, date, note} ]
-    }
-  }
-  sn_current = email when logged in
+  The backend (server.js) now owns all data: users, budget, expenses.
+  We only keep a JWT token + a small cached copy of the current user
+  in localStorage, so a page reload can restore the session.
 */
 
-const LS = {
-  get: (k) => JSON.parse(localStorage.getItem(k)),
-  set: (k, v) => localStorage.setItem(k, JSON.stringify(v))
-};
+const API_BASE = ''; // same-origin: server.js serves this file, so relative paths work
 
-let users = LS.get('sn_users') || {};
-let current = localStorage.getItem('sn_current') || null;
+let token = localStorage.getItem('sn_token') || null;
+let current = null;      // email, kept for readability in a couple of places below
+let currentUser = JSON.parse(localStorage.getItem('sn_user') || 'null'); // {id, firstName, email, budget}
+if (currentUser) current = currentUser.email;
+
+async function api(path, { method = 'GET', body } = {}) {
+  const headers = { 'Content-Type': 'application/json' };
+  if (token) headers['x-auth-token'] = token;
+  const res = await fetch(API_BASE + path, {
+    method,
+    headers,
+    body: body ? JSON.stringify(body) : undefined
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.msg || 'Request failed');
+  return data;
+}
+
+function setSession(newToken, user) {
+  token = newToken;
+  currentUser = user;
+  current = user ? user.email : null;
+  if (newToken) localStorage.setItem('sn_token', newToken); else localStorage.removeItem('sn_token');
+  if (user) localStorage.setItem('sn_user', JSON.stringify(user)); else localStorage.removeItem('sn_user');
+}
 
 /* =================================
    UI elements and initial wiring
@@ -342,12 +356,7 @@ const CATS = [
 /* ===========================
    Helpers
    =========================== */
-function saveUsers(){ LS.set('sn_users', users); }
-function currentUserObj(){ return current ? users[current] : null; }
-function setCurrent(email){
-  current = email;
-  if(email) localStorage.setItem('sn_current', email); else localStorage.removeItem('sn_current');
-}
+function currentUserObj(){ return currentUser; }
 
 /* ===========================
    AUTH: register & login
@@ -362,27 +371,32 @@ loginFormEls.showRegister.addEventListener('click', ()=> {
 });
 
 // Register
-registerFormEls.btn.addEventListener('click', ()=>{
+registerFormEls.btn.addEventListener('click', async ()=>{
   const f = registerFormEls.first.value.trim();
   const l = registerFormEls.last.value.trim();
   const e = registerFormEls.email.value.trim().toLowerCase();
   const p = registerFormEls.pass.value;
   if(!f||!l||!e||!p){ registerFormEls.msg.textContent = 'Fill all fields'; return; }
-  if(users[e]){ registerFormEls.msg.textContent = 'Account exists — login instead'; return; }
-  users[e] = { firstName:f, lastName:l, password:p, budget:0, expenses:[] };
-  saveUsers();
-  registerFormEls.msg.textContent = 'Account created. Please login.';
-  // switch to login
-  setTimeout(()=> { document.getElementById('register-form').style.display='none'; document.getElementById('login-form').style.display=''; }, 700);
+  try {
+    await api('/api/auth/register', { method:'POST', body:{ firstName:f, lastName:l, email:e, password:p } });
+    registerFormEls.msg.textContent = 'Account created. Please login.';
+    setTimeout(()=> { document.getElementById('register-form').style.display='none'; document.getElementById('login-form').style.display=''; }, 700);
+  } catch(err) {
+    registerFormEls.msg.textContent = err.message === 'User exists' ? 'Account exists — login instead' : err.message;
+  }
 });
 
 // Login
-loginFormEls.btn.addEventListener('click', ()=>{
+loginFormEls.btn.addEventListener('click', async ()=>{
   const e = loginFormEls.email.value.trim().toLowerCase();
   const p = loginFormEls.pass.value;
-  if(!users[e] || users[e].password !== p){ loginFormEls.msg.textContent = 'Invalid credentials'; return; }
-  setCurrent(e);
-  afterLogin();
+  try {
+    const data = await api('/api/auth/login', { method:'POST', body:{ email:e, password:p } });
+    setSession(data.token, data.user);
+    afterLogin();
+  } catch(err) {
+    loginFormEls.msg.textContent = 'Invalid credentials';
+  }
 });
 
 /* ===========================
@@ -405,12 +419,17 @@ function afterLogin(){
 /* ===========================
    Budget screen
    =========================== */
-btnSaveBudget.addEventListener('click', ()=>{
+btnSaveBudget.addEventListener('click', async ()=>{
   const v = parseFloat(budgetInput.value || 0);
   if(!v || v <= 0){ alert('Enter valid budget'); return; }
-  users[current].budget = v;
-  saveUsers();
-  showCategories();
+  try {
+    const data = await api('/api/budget', { method:'POST', body:{ budget:v } });
+    currentUser.budget = data.budget;
+    localStorage.setItem('sn_user', JSON.stringify(currentUser));
+    showCategories();
+  } catch(err) {
+    alert(err.message);
+  }
 });
 btnSkipBudget.addEventListener('click', ()=> showCategories());
 
@@ -470,17 +489,20 @@ modalClose.addEventListener('click', ()=> modalBackdrop.style.display='none');
 modalBackdrop.addEventListener('click', (e)=> { if(e.target === modalBackdrop) modalBackdrop.style.display='none'; });
 
 // Save functions
-function handleSaveExpense(keepOpen=false){
+async function handleSaveExpense(keepOpen=false){
   const cat = modalBackdrop.dataset.cat || modalCategory.textContent;
   const amount = parseFloat(modalAmount.value || 0);
   const date = modalDate.value;
   const note = modalNote.value || '';
   if(!amount || !date){ document.getElementById('modal-msg').textContent = 'Enter amount and date'; return; }
-  users[current].expenses.push({ category:cat, amount, date, note });
-  saveUsers();
-  document.getElementById('modal-msg').textContent = 'Saved ✓';
-  refreshTopNumbers();
-  if(!keepOpen) modalBackdrop.style.display='none'; else modalAmount.value='';
+  try {
+    await api('/api/expenses', { method:'POST', body:{ category:cat, amount, date, note } });
+    document.getElementById('modal-msg').textContent = 'Saved ✓';
+    await refreshTopNumbers();
+    if(!keepOpen) modalBackdrop.style.display='none'; else modalAmount.value='';
+  } catch(err) {
+    document.getElementById('modal-msg').textContent = err.message;
+  }
 }
 modalSave.addEventListener('click', ()=> handleSaveExpense(false));
 modalSaveAdd.addEventListener('click', ()=> handleSaveExpense(true));
@@ -497,14 +519,22 @@ function showAnalytics(){
 }
 
 /* charts rendering */
-function renderCharts(){
-  const u = currentUserObj();
-  if(!u) return;
-  const expenses = u.expenses || [];
+async function renderCharts(){
+  if(!currentUser) return;
+  let analytics, expenses;
+  try {
+    [analytics, expenses] = await Promise.all([
+      api('/api/analytics'),
+      api('/api/expenses')
+    ]);
+  } catch(err) {
+    alert(err.message);
+    return;
+  }
 
-  // category totals (fixed categories)
+  // category totals (fixed categories), from server-computed byCategory
   const labels = CATS.map(c=>c.key);
-  const totals = labels.map(l => expenses.filter(e=>e.category===l).reduce((s,x)=>s+x.amount,0));
+  const totals = labels.map(l => analytics.byCategory[l] || 0);
 
   if(pieChart) pieChart.destroy();
   pieChart = new Chart(pieCanvas.getContext('2d'), {
@@ -517,7 +547,7 @@ function renderCharts(){
   const dayNames = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
   const daySums = [0,0,0,0,0,0,0];
   expenses.forEach(e=>{
-    const d = new Date(e.date + 'T00:00:00');
+    const d = new Date(e.date);
     if(!isNaN(d)) daySums[d.getDay()] += e.amount;
   });
 
@@ -528,25 +558,28 @@ function renderCharts(){
     options:{ scales:{ y:{ beginAtZero:true } } }
   });
 
-  // summary
-  const total = expenses.reduce((s,e)=>s+e.amount,0);
-  sumTotal.textContent = '₹' + total.toFixed(0);
-  sumBudget.textContent = '₹' + (u.budget || 0);
-  sumRemaining.textContent = '₹' + Math.max(0, (u.budget||0) - total).toFixed(0);
+  // summary (straight from server)
+  sumTotal.textContent = '₹' + analytics.totalSpent.toFixed(0);
+  sumBudget.textContent = '₹' + (analytics.budget || 0);
+  sumRemaining.textContent = '₹' + analytics.remaining.toFixed(0);
 }
 
 /* ===========================
    UI helpers & top numbers
    =========================== */
-function refreshTopNumbers(){
-  const u = currentUserObj();
-  if(!u) return;
-  const total = (u.expenses || []).reduce((s,e)=>s+e.amount,0);
-  uiBudget.textContent = (u.budget||0);
-  uiSpent.textContent = total.toFixed(0);
+async function refreshTopNumbers(){
+  if(!currentUser) return;
+  let analytics;
+  try {
+    analytics = await api('/api/analytics');
+  } catch(err) {
+    return;
+  }
+  uiBudget.textContent = (analytics.budget||0);
+  uiSpent.textContent = analytics.totalSpent.toFixed(0);
 
   // if over budget show small alert near topbar (we'll show nav analytics etc)
-  if(total > (u.budget||0) && (u.budget || 0) > 0){
+  if(analytics.totalSpent > (analytics.budget||0) && (analytics.budget || 0) > 0){
     // subtle browser alert? We'll flash the analytics button
     btnAnalytics.classList.add('primary');
   } else {
@@ -558,7 +591,7 @@ function refreshTopNumbers(){
    Logout & session
    =========================== */
 btnLogout.addEventListener('click', ()=>{
-  setCurrent(null);
+  setSession(null, null);
   // show auth again
   document.getElementById('auth-screen').style.display = '';
   budgetScreen.style.display = 'none';
@@ -572,7 +605,7 @@ btnLogout.addEventListener('click', ()=>{
 /* ===========================
    Auto-login on load
    =========================== */
-(function init(){
+(async function init(){
   // inject listeners for open auth
   btnOpenAuth.addEventListener('click', ()=> {
     // show auth UI - it's visible in the centered card already
@@ -581,14 +614,18 @@ btnLogout.addEventListener('click', ()=>{
     document.getElementById('login-form').style.display = 'none';
   });
 
-  // If a user was logged in before (session)
-  if(current && users[current]){
-    // show main
-    afterLogin();
-  } else {
-    // show auth screen initially
-    document.getElementById('auth-screen').style.display = '';
+  // If a token was saved from a previous session, verify it's still valid
+  if(token){
+    try {
+      const user = await api('/api/me');
+      setSession(token, user);
+      afterLogin();
+      return;
+    } catch(err) {
+      setSession(null, null); // token expired/invalid, fall through to login screen
+    }
   }
+  document.getElementById('auth-screen').style.display = '';
 })();
 
 </script>

@@ -1,4 +1,6 @@
 // ===== Spending Navigator Backend (Single File) =====
+require("dotenv").config();
+const path = require("path");
 const express = require("express");
 const mongoose = require("mongoose");
 const bcrypt = require("bcryptjs");
@@ -9,14 +11,20 @@ const cors = require("cors");
 const app = express();
 const PORT = process.env.PORT || 5000;
 const JWT_SECRET = process.env.JWT_SECRET || "supersecret";
-const MONGO_URI = process.env.MONGO_URI || "mongodb://localhost:27017/spending_nav";
+const MONGO_URI = process.env.MONGO_URI;
+
+if (!MONGO_URI) {
+  console.error(" Missing MONGO_URI. Create a .env file (see .env.example) with your MongoDB Atlas connection string.");
+  process.exit(1);
+}
 
 // --- MIDDLEWARE ---
 app.use(cors());
 app.use(express.json());
+app.use(express.static(path.join(__dirname))); // serves index.html at "/"
 
 // --- CONNECT DB ---
-mongoose.connect(MONGO_URI, { useNewUrlParser: true, useUnifiedTopology: true })
+mongoose.connect(MONGO_URI)
   .then(()=> console.log(" MongoDB connected"))
   .catch(err=> console.error(" MongoDB error:", err));
 
@@ -79,6 +87,15 @@ app.post("/api/auth/login", async (req,res)=>{
       token, 
       user:{ id:user._id, firstName:user.firstName, email:user.email, budget:user.budget } 
     });
+  } catch(err){ res.status(500).json({ msg: err.message }); }
+});
+
+// GET CURRENT USER (used to restore session on page reload)
+app.get("/api/me", auth, async (req,res)=>{
+  try {
+    const user = await User.findById(req.user);
+    if(!user) return res.status(404).json({ msg:"User not found" });
+    res.json({ id:user._id, firstName:user.firstName, email:user.email, budget:user.budget });
   } catch(err){ res.status(500).json({ msg: err.message }); }
 });
 
